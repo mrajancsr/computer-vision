@@ -13,22 +13,22 @@ from neptunevision.generative_advesarial_network.gann import AdvesarialNets
 DATASET_PATH = os.path.join(os.getcwd(), "datasets")
 
 
-def make_layer(in_channel: int, out_channel):
-    """Makes a layer in the Discriminator network
+def make_layer(in_features: int, out_features) -> nn.Sequential:
+    """Makes a Sequential Layer with a Leaky ReLU for activation
 
     Parameters
     ----------
-    in_channel : int
-        _description_
-    out_channel : _type_
-        _description_
+    in_features : int
+        the number of features in sample
+    out_features : _type_
+        the number of output units in sample
 
     Returns
     -------
-    _type_
-        _description_
+    nn.Sequential
+        Sequential Layer composed of Linear and a LeakyReLU for activation
     """
-    return nn.Sequential(nn.Linear(in_channel, out_channel), nn.LeakyReLU(0.2))
+    return nn.Sequential(nn.Linear(in_features, out_features), nn.LeakyReLU(0.2))
 
 
 # Classifier for GAN
