@@ -9,11 +9,56 @@ from PIL import Image
 from torch.utils.data import DataLoader, Dataset
 from torchsummary import summary
 from torchvision import transforms
-from torchvision.datasets import MNIST
 
 from neptunevision.generative_advesarial_network.gann import AdvesarialNets
 
 DATASET_PATH = os.path.join(os.getcwd(), "datasets")
+
+
+def make_convolutional_layer(
+    in_channels: int,
+    out_channels: int,
+    kernel_size: int,
+    stride: int,
+    padding: int | str = 0,
+    bias: bool = False,
+) -> nn.Sequential:
+    """Makes a Layer composed of 2D Convolution, BatchNorm and LeakyReLU
+
+    Parameters
+    ----------
+    in_features : int
+        the number of features in sample
+    out_features : _type_
+        the number of output units in sample
+
+    Returns
+    -------
+    nn.Sequential
+        Sequential Layer composed of Linear and a LeakyReLU for activation
+    """
+    return nn.Sequential(
+        nn.Conv2d(in_channels, out_channels, kernel_size, stride, padding, bias=bias),
+        nn.BatchNorm2d(out_channels),
+        nn.LeakyReLU(0.2, inplace=True),
+    )
+
+
+def make_convtranspose2d_layer(
+    in_channels: int,
+    out_channels: int,
+    kernel_size: int,
+    stride: int,
+    padding: int | str = 0,
+    bias: bool = False,
+) -> nn.Sequential:
+    return nn.Sequential(
+        nn.ConvTranspose2d(
+            in_channels, out_channels, kernel_size, stride, padding, bias=bias
+        ),
+        nn.BatchNorm2d(out_channels),
+        nn.ReLU(True),
+    )
 
 
 def weights_init(m):
@@ -49,15 +94,9 @@ class Discriminator(nn.Module):
         self.model = nn.Sequential(
             nn.Conv2d(3, 64, 4, 2, 1, bias=False),
             nn.LeakyReLU(0.2, inplace=True),
-            nn.Conv2d(64, 64 * 2, 4, 2, 1, bias=False),
-            nn.BatchNorm2d(64 * 2),
-            nn.LeakyReLU(0.2, inplace=True),
-            nn.Conv2d(64 * 2, 64 * 4, 4, 2, 1, bias=False),
-            nn.BatchNorm2d(64 * 4),
-            nn.LeakyReLU(0.2, inplace=True),
-            nn.Conv2d(64 * 4, 64 * 8, 4, 2, 1, bias=False),
-            nn.BatchNorm2d(64 * 8),
-            nn.LeakyReLU(0.2, inplace=True),
+            make_convolutional_layer(64, 64 * 2, 4, 2, 1, bias=False),
+            make_convolutional_layer(64 * 2, 64 * 4, 4, 2, 1, bias=False),
+            make_convolutional_layer(64 * 4, 64 * 8, 4, 2, 1, bias=False),
             nn.Conv2d(64 * 8, 1, 4, 1, 0, bias=False),
             nn.Sigmoid(),
         )
@@ -69,18 +108,10 @@ class Generator(nn.Module):
     def __init__(self):
         super(Generator, self).__init__()
         self.model = nn.Sequential(
-            nn.ConvTranspose2d(100, 64 * 8, 4, 1, 0, bias=False),
-            nn.BatchNorm2d(64 * 8),
-            nn.ReLU(True),
-            nn.ConvTranspose2d(64 * 8, 64 * 4, 4, 2, 1, bias=False),
-            nn.BatchNorm2d(64 * 4),
-            nn.ReLU(True),
-            nn.ConvTranspose2d(64 * 4, 64 * 2, 4, 2, 1, bias=False),
-            nn.BatchNorm2d(64 * 2),
-            nn.ReLU(True),
-            nn.ConvTranspose2d(64 * 2, 64, 4, 2, 1, bias=False),
-            nn.BatchNorm2d(64),
-            nn.ReLU(True),
+            make_convtranspose2d_layer(100, 64 * 8, 4, 1, 0, bias=False),
+            make_convtranspose2d_layer(64 * 8, 64 * 4, 4, 2, 1, bias=False),
+            make_convtranspose2d_layer(64 * 4, 64 * 2, 4, 2, 1, bias=False),
+            make_convtranspose2d_layer(64 * 2, 64, 4, 2, 1, bias=False),
             nn.ConvTranspose2d(64, 3, 4, 2, 1, bias=False),
             nn.Tanh(),
         )
@@ -93,7 +124,9 @@ class Generator(nn.Module):
 def main():
     device = "mps"
 
-    # Normalize and convert data to tensors
+    BATCH_SIZE = 64
+    NUM_WORKERS = 8
+    # Resize image to 3x64x64 and normalize
     transform = transforms.Compose(
         [
             transforms.Resize(64),
@@ -103,26 +136,28 @@ def main():
         ]
     )
     # Download the faces dataset
-    folder = os.path.join(DATASET_PATH, 'male_female_faces')
-    mnist = MNIST(DATASET_PATH, download=True, train=True, transform=transform)
-    mnist_dl = DataLoader(mnist, batch_size=128, shuffle=True, drop_last=True)
+    folder = os.path.join(DATASET_PATH, "male_female_faces")
+    faces_ds = Faces(folder=folder, transform=transform)
+    faces_dl = DataLoader(
+        faces_ds, batch_size=BATCH_SIZE, shuffle=True, num_workers=NUM_WORKERS
+    )
 
     discriminator = Discriminator()
-    generator = Generator()
     print("\n")
     print("Summary of Discriminator")
-    summary(discriminator, torch.zeros(1, 784))
+    summary(discriminator, torch.zeros(1, 3, 64, 64))
 
     print("\n")
+    generator = Generator()
     print("Summary of Generator")
-    summary(generator, torch.zeros(1, 100))
+    summary(generator, torch.zeros(1, 100, 1, 1))
     print("\n")
 
     # Number of training epochs
-    num_epochs = 200
+    num_epochs = 20
 
     gan = AdvesarialNets(
-        generator.to(device), discriminator.to(device), mnist_dl, num_epochs
+        generator.to(device), discriminator.to(device), faces_dl, num_epochs
     )
     gan.train()
 
